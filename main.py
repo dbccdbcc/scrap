@@ -61,7 +61,7 @@ driver = webdriver.Chrome()
 wait = WebDriverWait(driver, 10)
 
 # Load dates
-df_dates = pd.read_excel("RaceDateList.xlsx")
+#df_dates = pd.read_excel("RaceDateList.xlsx")
 
 for entry in race_dates:
     date_id = entry["id"]
@@ -99,7 +99,7 @@ for entry in race_dates:
                         for td in td_elements:
                             lines = td.text.strip().splitlines()
                             for line in lines:
-                                if ("Class" in line or "Group" in line) and "M" in line:
+                                if ("Class" in line or "Group" in line or "Restricted" in line or "Griffin" in line) and "M" in line:
                                     race_info = line.strip()
                                     raise StopIteration
                     except StopIteration:
