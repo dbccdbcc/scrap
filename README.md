@@ -79,6 +79,34 @@ CREATE TABLE race_results (
   FOREIGN KEY (raceDateId) REFERENCES race_days(id)
 );
 
+for future development (prediction)
+
+CREATE TABLE future_races (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    race_info VARCHAR(100),
+    horse_no INT,
+    horse VARCHAR(100),
+    draw_no INT,
+    act_wt INT,
+    jockey VARCHAR(100),
+    trainer VARCHAR(100),
+    win_odds FLOAT,
+    place_odds FLOAT,
+    race_date DATE,
+    course VARCHAR(50),
+    race_no INT
+);
+
+CREATE TABLE race_predictions (
+    race_date DATE,
+    race_no INT,
+    horse_no INT,
+    horse VARCHAR(100),
+    win_probability FLOAT,
+    place_probability FLOAT
+);
+
+
 🚀 How to Run
 
 insert dates to racedates
