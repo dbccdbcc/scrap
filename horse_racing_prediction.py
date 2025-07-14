@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-import pymysql
 import re
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -8,12 +7,14 @@ from xgboost import XGBClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 from dotenv import load_dotenv
+from sqlalchemy import create_engine
+import json
 
 # Step 1: Check package versions
 print("pandas version:", pd.__version__)
-print("xgboost version:", XGBClassifier.__module__.split('.')[0] + " " + XGBClassifier.__module__.split('.')[1])
+#print("xgboost version:", XGBClassifier().get_xgb_params()['n_estimators'], " (version", XGBClassifier.__version__, ")")
 
-# Step 2: Connect to MySQL
+# Step 2: Connect to MySQL with SQLAlchemy
 load_dotenv()
 db_config = {
     "host": os.getenv("DB_HOST"),
@@ -22,11 +23,12 @@ db_config = {
     "database": os.getenv("DB_NAME"),
     "charset": "utf8mb4"
 }
-
 try:
-    conn = pymysql.connect(**db_config)
-    cursor = conn.cursor()
-except pymysql.MySQLError as e:
+    engine = create_engine(
+        f"mysql+pymysql://{db_config['user']}:{db_config['password']}@{db_config['host']}/{db_config['database']}?charset={db_config['charset']}"
+    )
+    print("MySQL connection established with SQLAlchemy")
+except Exception as e:
     print(f"MySQL connection error: {e}")
     exit(1)
 
@@ -42,7 +44,7 @@ WHERE pla IS NOT NULL
   AND win_odds IS NOT NULL 
   AND finish_time IS NOT NULL
 """
-df = pd.read_sql(query_historical, conn)
+df = pd.read_sql(query_historical, engine)
 
 # Step 4: Load future data
 query_future = """
@@ -51,8 +53,7 @@ SELECT
     win_odds, place_odds, race_date, course, race_no
 FROM future_races
 """
-new_data = pd.read_sql(query_future, conn)
-conn.close()
+new_data = pd.read_sql(query_future, engine)
 
 # Debug: Print dataset sizes and unique values
 print(f"Number of rows in race_results: {len(df)}")
@@ -198,21 +199,21 @@ print("is_placed distribution:", df['is_placed'].value_counts().to_dict())
 # Step 11: Feature engineering (historical) - Part 1
 # Compute speed and win/place rates before dropna
 df['speed'] = df['distance'] / df['finish_time_secs']
-df_historical = df.copy()  # Save copy for Step 16
+df_historical = df.copy()
 
 for col in ['horse', 'jockey', 'trainer']:
     df[f'{col}_win_rate'] = df.groupby(col)['is_winner'].transform('mean')
     df[f'{col}_place_rate'] = df.groupby(col)['is_placed'].transform('mean')
 
-# Calculate jockey_trainer rates with minimum race threshold
-min_races = 3
+# Calculate jockey_trainer rates
 jockey_trainer_counts = df[df['jockey'].notna() & df['trainer'].notna()].groupby(['jockey', 'trainer']).size().reset_index(name='race_count')
 jockey_trainer_win = df[df['jockey'].notna() & df['trainer'].notna()].groupby(['jockey', 'trainer'])['is_winner'].mean().reset_index(name='jockey_trainer_win_rate')
 jockey_trainer_win = jockey_trainer_win.merge(jockey_trainer_counts, on=['jockey', 'trainer'])
-jockey_trainer_win = jockey_trainer_win[jockey_trainer_win['race_count'] >= min_races]
 jockey_trainer_place = df[df['jockey'].notna() & df['trainer'].notna()].groupby(['jockey', 'trainer'])['is_placed'].mean().reset_index(name='jockey_trainer_place_rate')
-jockey_trainer_place = jockey_trainer_place.merge(jockey_trainer_counts, on=['jockey', 'trainer'])
-jockey_trainer_place = jockey_trainer_place[jockey_trainer_place['race_count'] >= min_races]
+jockey_trainer_win = jockey_trainer_win.merge(jockey_trainer_place[['jockey', 'trainer', 'jockey_trainer_place_rate']], on=['jockey', 'trainer'])
+# Improve jockey_trainer_win_rate for race_count=1
+jockey_trainer_win['jockey_trainer_win_rate'] = jockey_trainer_win.apply(
+    lambda row: df[df['jockey'] == row['jockey']]['jockey_win_rate'].mean() if row['race_count'] == 1 else row['jockey_trainer_win_rate'], axis=1)
 
 # Debug: Check win rate distributions before dropna
 print("Unique horse_win_rate values:", df['horse_win_rate'].nunique(), "Sample:", df['horse_win_rate'].head(10).tolist())
@@ -220,7 +221,6 @@ print("Unique jockey_win_rate values:", df['jockey_win_rate'].nunique(), "Sample
 print("Unique trainer_win_rate values:", df['trainer_win_rate'].nunique(), "Sample:", df['trainer_win_rate'].head(10).tolist())
 print(f"jockey_trainer_win DataFrame shape: {jockey_trainer_win.shape}")
 print("Sample jockey_trainer_win rows:", jockey_trainer_win.head().to_dict())
-print("jockey_trainer_win_rate distribution:", df['jockey_trainer_win_rate'].value_counts().head(10).to_dict() if 'jockey_trainer_win_rate' in df.columns else "Column not yet created")
 print("Jockey-trainer pair frequency:", jockey_trainer_counts.head(10).to_dict())
 
 # Step 12: Drop rows with missing critical values (historical)
@@ -242,8 +242,7 @@ df['races_last_30_days'] = df.groupby('horse')['race_date'].transform(
 )
 
 # Merge jockey_trainer and course features
-df = df.merge(jockey_trainer_win[['jockey', 'trainer', 'jockey_trainer_win_rate']], on=['jockey', 'trainer'], how='left')
-df = df.merge(jockey_trainer_place[['jockey', 'trainer', 'jockey_trainer_place_rate']], on=['jockey', 'trainer'], how='left')
+df = df.merge(jockey_trainer_win[['jockey', 'trainer', 'jockey_trainer_win_rate', 'jockey_trainer_place_rate']], on=['jockey', 'trainer'], how='left')
 # Impute missing jockey_trainer rates with jockey mean, then overall mean
 df['jockey_trainer_win_rate'] = df['jockey_trainer_win_rate'].fillna(df.groupby('jockey')['jockey_trainer_win_rate'].transform('mean'))
 df['jockey_trainer_win_rate'] = df['jockey_trainer_win_rate'].fillna(df['jockey_trainer_win_rate'].mean())
@@ -256,10 +255,13 @@ df = df.merge(place_rate_course, on=['horse', 'course'], how='left')
 
 # Debug: Check jockey_trainer merges
 print("Columns after jockey_trainer merges:", df.columns.tolist())
-print("Sample jockey_trainer_win_rate values:", df['jockey_trainer_win_rate'].head(10).tolist() if 'jockey_trainer_win_rate' in df.columns else "Column missing")
-print("Sample jockey_trainer_place_rate values:", df['jockey_trainer_place_rate'].head(10).tolist() if 'jockey_trainer_place_rate' in df.columns else "Column missing")
+print("Sample jockey_trainer_win_rate values:", df['jockey_trainer_win_rate'].head(10).tolist())
+print("Sample jockey_trainer_place_rate values:", df['jockey_trainer_place_rate'].head(10).tolist())
+print("jockey_trainer_win_rate distribution:", df['jockey_trainer_win_rate'].value_counts().head(10).to_dict())
+print("jockey_trainer_win_rate summary: min=%.4f, max=%.4f, mean=%.4f, std=%.4f" % (
+    df['jockey_trainer_win_rate'].min(), df['jockey_trainer_win_rate'].max(),
+    df['jockey_trainer_win_rate'].mean(), df['jockey_trainer_win_rate'].std()))
 print("Unmatched jockey_trainer_win merges:", df['jockey_trainer_win_rate'].isna().sum())
-print("Unmatched jockey_trainer_place merges:", df['jockey_trainer_place_rate'].isna().sum())
 print("Unmatched jockey-trainer pairs:", df[df['jockey_trainer_win_rate'].isna()][['jockey', 'trainer']].drop_duplicates().to_dict())
 
 # Drop horse, jockey, trainer columns
@@ -344,7 +346,6 @@ scaler = StandardScaler()
 df[valid_numerical_features] = scaler.fit_transform(df[valid_numerical_features])
 
 # Step 16: Feature engineering (future)
-# Perform merges requiring horse, jockey, trainer, course before dummy encoding
 new_data = new_data.merge(
     df_historical.groupby('horse')[['pla', 'is_placed', 'speed']].mean().reset_index().rename(
         columns={'pla': 'avg_pla_last_5', 'is_placed': 'place_rate_last_5', 'speed': 'avg_speed_last_5'}),
@@ -378,7 +379,7 @@ new_data['jockey_trainer_win_rate'] = new_data['jockey_trainer_win_rate'].fillna
 new_data['jockey_trainer_place_rate'] = new_data['jockey_trainer_place_rate'].fillna(new_data.groupby('jockey')['jockey_trainer_place_rate'].transform('mean'))
 new_data['jockey_trainer_place_rate'] = new_data['jockey_trainer_place_rate'].fillna(df['jockey_trainer_place_rate'].mean())
 
-# Now create course_draw and dummy variables
+# Create course_draw and dummy variables
 new_data['course_draw'] = new_data['course'] + '_' + new_data['draw_no'].astype(str)
 new_data = pd.get_dummies(new_data, columns=['course'], prefix='course')
 new_data = pd.get_dummies(new_data, columns=['course_draw'], prefix='course_draw')
@@ -398,7 +399,7 @@ for col in ['avg_pla_last_5', 'place_rate_last_5', 'avg_speed_last_5', 'jockey_w
     new_data[col] = new_data[col].fillna(df[col].mean() if col in df.columns else 0)
 
 # Step 18: Standardize future data
-new_data_numerical_features = valid_numerical_features.copy()  # Use same features as df
+new_data_numerical_features = valid_numerical_features.copy()
 for col in new_data_numerical_features:
     if col not in new_data.columns:
         print(f"Adding missing column '{col}' to new_data with mean value from df")
@@ -449,10 +450,19 @@ print("Predictions saved to predictions.csv")
 
 # Step 23: Save predictions to MySQL
 try:
-    with pymysql.connect(**db_config) as conn:
+    with engine.connect() as conn:
         new_data[['race_date', 'race_no', 'horse_no', 'horse', 'win_probability', 'place_probability']].to_sql(
             'race_predictions', conn, if_exists='replace', index=False
         )
     print("Predictions saved to MySQL table race_predictions")
-except pymysql.MySQLError as e:
+except Exception as e:
     print(f"Error saving to MySQL: {e}")
+
+# Step 24: Visualize jockey_trainer_win_rate distribution
+hist, bins = np.histogram(df['jockey_trainer_win_rate'], bins=30)
+hist_data = {
+    "bins": bins.tolist(),
+    "counts": hist.tolist(),
+    "bin_edges": [(bins[i], bins[i+1]) for i in range(len(bins)-1)]
+}
+print("jockey_trainer_win_rate histogram (30 bins):", json.dumps(hist_data, indent=2))
