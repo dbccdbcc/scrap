@@ -79,7 +79,7 @@ CREATE TABLE race_results (
   FOREIGN KEY (raceDateId) REFERENCES race_days(id)
 );
 
-for future development (prediction)
+prediction
 
 CREATE TABLE future_races (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -141,6 +141,11 @@ HV → Races 1–9
 ✅ Skips entire course if Race 1 is missing
 
 ✅ Loads DB credentials securely via .env
+
+After the dataset was completed 
+
+python scrape_race_card.py
+python horse_racing_prediction.py
 
 📌 Notes
 Ensure ChromeDriver version matches your local Chrome browser
