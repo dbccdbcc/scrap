@@ -12,7 +12,7 @@ import json
 
 # Step 1: Check package versions
 print("pandas version:", pd.__version__)
-#print("xgboost version:", XGBClassifier().get_xgb_params()['n_estimators'], " (version", XGBClassifier.__version__, ")")
+#print("xgboost version:", xgboost.__version__)
 
 # Step 2: Connect to MySQL with SQLAlchemy
 load_dotenv()
