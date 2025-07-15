@@ -79,7 +79,7 @@ CREATE TABLE race_results (
   FOREIGN KEY (raceDateId) REFERENCES race_days(id)
 );
 
-for future development (prediction)
+prediction
 
 CREATE TABLE future_races (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -141,6 +141,54 @@ HV → Races 1–9
 ✅ Skips entire course if Race 1 is missing
 
 ✅ Loads DB credentials securely via .env
+
+After the dataset was completed 
+
+Then we can do the Horse Racing Prediction
+
+Overview
+
+This project contains a Python script (horse_racing_prediction.py) that predicts horse racing outcomes (win and place probabilities) using historical race data and machine learning. The script uses an XGBoost classifier to model the probability of a horse winning or placing (top 3) in a race, based on features like jockey and trainer performance, horse history, and race characteristics. It connects to a MySQL database to load historical and future race data, performs feature engineering (e.g., jockey_trainer_win_rate), and saves predictions to a CSV file and a MySQL table. A histogram of the jockey_trainer_win_rate distribution is also generated.
+
+Features
+
+Data Loading: Retrieves historical (race_results) and future (future_races) race data from a MySQL database using SQLAlchemy.
+
+Feature Engineering:
+
+Parses race_info to extract race class, distance, and rating range.
+
+Computes win and place rates for horses, jockeys, and trainers.
+
+Calculates jockey_trainer_win_rate with improved logic (uses jockey_win_rate as a fallback for pairs with race_count <= 1).
+
+Includes rolling averages (e.g., last 5 races) and course-specific metrics.
+
+Modeling: Trains two XGBoost models (is_winner, is_placed) with ROC AUC evaluation (~0.868 for win, ~0.873 for place).
+
+Outputs:
+
+Saves predictions (win_probability, place_probability) to predictions.csv.
+
+Saves predictions to the MySQL race_predictions table.
+
+Generates a 30-bin histogram of jockey_trainer_win_rate as JSON.
+
+Environment: Compatible with Python 3.9+, pandas==1.5.3, xgboost==1.7.6, sqlalchemy==1.4.52.
+
+Requirements
+
+Python: 3.9 or higher
+
+Dependencies:
+
+pip install numpy==1.23.5 pandas==1.5.3 xgboost==1.7.6 scikit-learn==1.2.2 scipy==1.10.1 python-dotenv pymysql sqlalchemy==1.4.52
+
+1. 
+python scrape_race_card.py
+
+2.
+python horse_racing_prediction.py
 
 📌 Notes
 Ensure ChromeDriver version matches your local Chrome browser
