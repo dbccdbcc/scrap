@@ -37,8 +37,9 @@ cursor.execute("SELECT MAX(raceDateId) FROM race_results")
 max_id_in_results = cursor.fetchone()[0] or 0  # fallback to 0 if None
 
 START_ID = max_id_in_results + 1
-END_ID = START_ID + 4  # or any batch size
+END_ID = START_ID + 19  # or any batch size
 
+dayRemaining = END_ID-START_ID+1
 
 # Safety check
 if START_ID <= max_id_in_results:
@@ -85,7 +86,8 @@ for entry in race_dates:
         if race_exists:
             print(f"🔁 {date_str} {course} R1 exists, checking races 1–11")
             race_range = range(1, 12) if course == "ST" else range(1, 10)
-            
+            print(f"{dayRemaining} day left")
+            dayRemaining=dayRemaining-1
             for race_no in race_range:
                 url = f"https://racing.hkjc.com/racing/information/English/Racing/LocalResults.aspx?RaceDate={date_str}&Racecourse={course}&RaceNo={race_no}"
                 try:
