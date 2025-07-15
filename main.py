@@ -37,7 +37,7 @@ cursor.execute("SELECT MAX(raceDateId) FROM race_results")
 max_id_in_results = cursor.fetchone()[0] or 0  # fallback to 0 if None
 
 START_ID = max_id_in_results + 1
-END_ID = START_ID + 19  # or any batch size
+END_ID = START_ID + 9  # or any batch size
 
 dayRemaining = END_ID-START_ID+1
 
@@ -58,8 +58,15 @@ race_dates = [
 
 
 # Setup Selenium
-driver = webdriver.Chrome()
+#driver = webdriver.Chrome()
+#wait = WebDriverWait(driver, 10)
+
+options = webdriver.ChromeOptions()
+options.add_argument("--headless")
+driver = webdriver.Chrome(options=options)
 wait = WebDriverWait(driver, 10)
+
+
 
 # Load dates
 #df_dates = pd.read_excel("RaceDateList.xlsx")
