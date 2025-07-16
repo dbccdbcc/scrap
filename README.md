@@ -1,199 +1,140 @@
-🏇 HKJC Race Results Scraper
-This project scrapes detailed Hong Kong Jockey Club (HKJC) local race result data and inserts it into a MySQL database. It supports efficient scraping by date ID, racecourse (ST/HV), full horse result tables, and avoids duplication using raceDateId foreign key logic.
+Horse Racing Prediction Pipeline (HKJC)
+Overview
+This project provides an end-to-end pipeline for scraping Hong Kong Jockey Club (HKJC) horse racing data, storing it in MySQL, engineering features, training prediction models (XGBoost), and outputting probability-based forecasts (including Monte Carlo simulations) for upcoming races.
 
-📦 Features
-Scrapes race result data from:
-https://racing.hkjc.com/racing/information/English/Racing/LocalResults.aspx
-Supports both Sha Tin (ST) and Happy Valley (HV) racecourses
-
-Extracts full race tables including:
-
-Placing, Horse No, Name, Jockey, Trainer, Weights, Draw, Odds, etc.
-
-Automatically skips unavailable race pages
-
-Inserts data directly into a MySQL database with referential integrity
-
-Uses .env for secure DB credential handling
-
-Prevents reprocessing via raceDateId safeguard
-
-Configurable scraping range via START_ID / END_ID
-
-📁 Folder Structure
-
-project/
-├── scraper.py           # Main scraper script
-├── .env                 # Environment variables (NOT committed)
-├── requirements.txt     # Python dependencies
-└── README.md            # You're here
-🔧 Requirements
+Folder Structure
+bash
+Copy
+Edit
+.
+├── scrape_race_results.py      # Scrape past race results into MySQL
+├── scrape_race_card.py         # Scrape future race cards (race entries & odds)
+├── horse_racing_prediction.py  # Feature engineering, model training, prediction & simulation
+├── tables.sql                  # SQL file to create all necessary tables
+├── .env                        # Environment variables (DB credentials etc.)
+└── README.md                   # This file
+Prerequisites
 Python 3.8+
 
-Google Chrome + chromedriver
+MySQL server
 
-MySQL 5.7/8.0
+Chrome browser and ChromeDriver (for Selenium scraping)
 
-Required Python packages:
+Python libraries:
 
-pip install -r requirements.txt
-✅ Environment Setup
+selenium
 
-Create a .env file:
+pymysql
 
+sqlalchemy
+
+python-dotenv
+
+pandas
+
+numpy
+
+xgboost
+
+tqdm
+
+beautifulsoup4
+
+Install required libraries:
+
+bash
+Copy
+Edit
+pip install selenium pymysql sqlalchemy python-dotenv pandas numpy xgboost tqdm beautifulsoup4
+Setup
+Database
+
+Run tables.sql in your MySQL server to create all necessary tables:
+
+bash
+Copy
+Edit
+mysql -u youruser -p yourdb < tables.sql
+Environment Variables
+
+Create a .env file in your project folder with:
+
+ini
+Copy
+Edit
 DB_HOST=localhost
 DB_USER=your_mysql_user
-DB_PASSWORD=your_mysql_password
-DB_NAME=your_database
+DB_PASSWORD=your_password
+DB_NAME=your_database_name
+ChromeDriver
 
-🧮 MySQL Schema
-racedates (holds dates to scrape)
+Download the version matching your Chrome from here
 
-CREATE TABLE racedates (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  RaceDate DATE NOT NULL
-);
+Ensure it’s on your system PATH or specify its path in your scripts if needed.
 
-race_results (scraped data)
+Usage
+1. Scrape Historical Race Results
+bash
+Copy
+Edit
+python scrape_race_results.py
+Scrapes past results from HKJC and inserts them into the race_results table.
 
-CREATE TABLE race_results (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  raceDateId INT,
-  race_date DATE,
-  course VARCHAR(10),
-  race_no INT,
-  race_info VARCHAR(255),
-  pla VARCHAR(10),
-  horse_no VARCHAR(10),
-  horse VARCHAR(100),
-  jockey VARCHAR(100),
-  trainer VARCHAR(100),
-  act_wt VARCHAR(10),
-  declared_wt VARCHAR(10),
-  draw_no VARCHAR(10),
-  lbw VARCHAR(10),
-  running_position VARCHAR(50),
-  finish_time VARCHAR(20),
-  win_odds VARCHAR(10),
-  url TEXT,
-  FOREIGN KEY (raceDateId) REFERENCES race_days(id)
-);
+Uses Selenium to automate data extraction for each race date.
 
-prediction
-
-CREATE TABLE future_races (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    race_info VARCHAR(100),
-    horse_no INT,
-    horse VARCHAR(100),
-    draw_no INT,
-    act_wt INT,
-    jockey VARCHAR(100),
-    trainer VARCHAR(100),
-    win_odds FLOAT,
-    place_odds FLOAT,
-    race_date DATE,
-    course VARCHAR(50),
-    race_no INT
-);
-
-CREATE TABLE race_predictions (
-    race_date DATE,
-    race_no INT,
-    horse_no INT,
-    horse VARCHAR(100),
-    win_probability FLOAT,
-    place_probability FLOAT
-);
-
-
-🚀 How to Run
-
-insert dates to racedates
-e.g
-INSERT INTO racedates (racedate) VALUES
-('2023-07-23'),
-('2023-07-29'),
-('2023-07-30'),
-('2023-08-01'),
-('2023-08-02');
-
-Run the scraper:
-
-python scraper.py
-It will:
-
-Load race dates from race_days WHERE id BETWEEN START_ID AND END_ID
-
-Skip if START_ID <= MAX(raceDateId) in race_results
-
-Insert new race result data into race_results
-
-🛡 Safety Features
-✅ Prevents duplicate inserts via raceDateId
-
-✅ Only scrapes valid races:
-
-ST → Races 1–11
-
-HV → Races 1–9
-
-✅ Skips entire course if Race 1 is missing
-
-✅ Loads DB credentials securely via .env
-
-After the dataset was completed 
-
-Then we can do the Horse Racing Prediction
-
-Overview
-
-This project contains a Python script (horse_racing_prediction.py) that predicts horse racing outcomes (win and place probabilities) using historical race data and machine learning. The script uses an XGBoost classifier to model the probability of a horse winning or placing (top 3) in a race, based on features like jockey and trainer performance, horse history, and race characteristics. It connects to a MySQL database to load historical and future race data, performs feature engineering (e.g., jockey_trainer_win_rate), and saves predictions to a CSV file and a MySQL table. A histogram of the jockey_trainer_win_rate distribution is also generated.
-
-Features
-
-Data Loading: Retrieves historical (race_results) and future (future_races) race data from a MySQL database using SQLAlchemy.
-
-Feature Engineering:
-
-Parses race_info to extract race class, distance, and rating range.
-
-Computes win and place rates for horses, jockeys, and trainers.
-
-Calculates jockey_trainer_win_rate with improved logic (uses jockey_win_rate as a fallback for pairs with race_count <= 1).
-
-Includes rolling averages (e.g., last 5 races) and course-specific metrics.
-
-Modeling: Trains two XGBoost models (is_winner, is_placed) with ROC AUC evaluation (~0.868 for win, ~0.873 for place).
-
-Outputs:
-
-Saves predictions (win_probability, place_probability) to predictions.csv.
-
-Saves predictions to the MySQL race_predictions table.
-
-Generates a 30-bin histogram of jockey_trainer_win_rate as JSON.
-
-Environment: Compatible with Python 3.9+, pandas==1.5.3, xgboost==1.7.6, sqlalchemy==1.4.52.
-
-Requirements
-
-Python: 3.9 or higher
-
-Dependencies:
-
-pip install numpy==1.23.5 pandas==1.5.3 xgboost==1.7.6 scikit-learn==1.2.2 scipy==1.10.1 python-dotenv pymysql sqlalchemy==1.4.52
-
-1. 
+2. Scrape Future Race Cards
+bash
+Copy
+Edit
 python scrape_race_card.py
+Scrapes entries and odds for upcoming races into the future_races table.
 
-2.
+Designed to be run before model prediction (preferably race day).
+
+3. Run Predictions & Monte Carlo Simulations
+bash
+Copy
+Edit
 python horse_racing_prediction.py
+Does everything: Feature engineering, model training (win/place), prediction, and Monte Carlo simulation for win/place.
 
-📌 Notes
-Ensure ChromeDriver version matches your local Chrome browser
+Outputs predictions to race_predictions table in MySQL and optionally to a CSV.
 
-You can schedule runs with cron, Windows Task Scheduler, or Python schedule
+Model uses the latest 400 racedays (or all if fewer).
 
-📄 License
-MIT — Free to use and modify.
+Table Overview
+racedates: List of historical race days.
+
+race_results: Historical race results and metadata.
+
+future_races: Runners and odds for upcoming races.
+
+race_predictions: Final output with model and simulated probabilities for win/place.
+
+race_predictions columns:
+Column	Description
+race_date	Race date (datetime)
+race_no	Race number
+horse_no	Horse number
+horse	Horse name
+win_probability	Model-predicted win probability
+place_probability	Model-predicted place probability
+sim_win_pct	Simulated win % (Monte Carlo)
+sim_place_pct	Simulated place % (Monte Carlo)
+
+Notes
+All code is modular: You can update, rerun, or adapt any stage independently.
+
+Extensible: Add more features, models, or export destinations as needed.
+
+Safe for repeated runs: Insertions are handled robustly; model predictions always reflect the most current data.
+
+Credits
+Developed by Daniel Chan and ChatGPT (OpenAI) for Hong Kong racing analytics.
+
+Troubleshooting
+Make sure .env is filled correctly and MySQL is running.
+
+If Selenium or ChromeDriver throws an error, check versions or PATH.
+
+For very large databases, adjust the script queries or table sizes as needed.
