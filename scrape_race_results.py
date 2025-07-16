@@ -2,7 +2,7 @@
 """
 @author: Daniel
 """
-
+import gc
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -38,7 +38,7 @@ cursor.execute("SELECT MAX(raceDateId) FROM race_results")
 max_id_in_results = cursor.fetchone()[0] or 0  # fallback to 0 if None
 
 START_ID = max_id_in_results + 1
-END_ID = START_ID + 49  # or any batch size
+END_ID = START_ID + 39  # or any batch size
 
 dayRemaining = END_ID-START_ID+1
 
@@ -166,7 +166,16 @@ for entry in race_dates:
                         cursor.execute(sql, values)
 
                     print(f"✅ {date_str} {course} R{race_no} extracted and inserted")
-
+                    try:
+                        del rows
+                    except: pass
+                    try:
+                        del table
+                    except: pass
+                    try:
+                        del td_elements
+                    except: pass
+                    gc.collect()
                 except Exception:
                     print(f"⚠️ Skipped: {date_str} {course} R{race_no}")
 
