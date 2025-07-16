@@ -7,12 +7,13 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+#from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import os
 from dotenv import load_dotenv
 import pymysql
-import pandas as pd
+#import pandas as pd
 
+load_dotenv()
 
 db_config = {
     "host": os.getenv("DB_HOST"),
@@ -37,7 +38,7 @@ cursor.execute("SELECT MAX(raceDateId) FROM race_results")
 max_id_in_results = cursor.fetchone()[0] or 0  # fallback to 0 if None
 
 START_ID = max_id_in_results + 1
-END_ID = START_ID + 9  # or any batch size
+END_ID = START_ID + 49  # or any batch size
 
 dayRemaining = END_ID-START_ID+1
 
