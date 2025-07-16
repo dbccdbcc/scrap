@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 @author: Daniel
 """
@@ -11,10 +10,11 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import os
 from dotenv import load_dotenv
 import pymysql
-#import pandas as pd
+from bs4 import BeautifulSoup
+import re
 
+# -- Environment and DB Setup --
 load_dotenv()
-
 db_config = {
     "host": os.getenv("DB_HOST"),
     "user": os.getenv("DB_USER"),
@@ -22,32 +22,21 @@ db_config = {
     "database": os.getenv("DB_NAME"),
     "charset": "utf8mb4"
 }
-# Setup MySQL connection
 conn = pymysql.connect(**db_config)
 cursor = conn.cursor()
 
-
-
 # Get race dates from MySQL table
-START_ID = 0
-END_ID = 0
-
-
-# Get the highest raceDateId already in race_results
 cursor.execute("SELECT MAX(raceDateId) FROM race_results")
 max_id_in_results = cursor.fetchone()[0] or 0  # fallback to 0 if None
-
 START_ID = max_id_in_results + 1
-END_ID = START_ID + 39  # or any batch size
-
+END_ID = START_ID + 5  # or any batch size
 dayRemaining = END_ID-START_ID+1
 
-# Safety check
 if START_ID <= max_id_in_results:
     raise ValueError(
         f"❌ START_ID ({START_ID}) must be greater than the max raceDateId already in race_results ({max_id_in_results})"
     )
-    
+
 cursor.execute(
     "SELECT id, RaceDate FROM racedates WHERE id BETWEEN %s AND %s ORDER BY id",
     (START_ID, END_ID)
@@ -57,29 +46,75 @@ race_dates = [
     for row in cursor.fetchall()
 ]
 
-
-# Setup Selenium
-#driver = webdriver.Chrome()
-#wait = WebDriverWait(driver, 10)
-
 options = webdriver.ChromeOptions()
 options.add_argument("--headless")
 driver = webdriver.Chrome(options=options)
 wait = WebDriverWait(driver, 10)
 
+# --- New function for parsing surface/track/going from HTML ---
+def parse_race_conditions(soup):
+    text = soup.get_text(separator="\n", strip=True)
+    going = None
+    surface = None
+    track = None
 
+    # Extract Going
+    going_match = re.search(r"Going\s*:\s*([^\n]+)", text, re.IGNORECASE)
+    if going_match:
+        going = going_match.group(1).strip().upper()
 
-# Load dates
-#df_dates = pd.read_excel("RaceDateList.xlsx")
+    # Extract Surface and Track from 'Course : ...'
+    course_match = re.search(r"Course\s*:\s*([^\n]+)", text, re.IGNORECASE)
+    if course_match:
+        course_field = course_match.group(1).strip().upper()
+        # Surface
+        if "ALL WEATHER" in course_field:
+            surface = "ALL WEATHER TRACK"
+            track = "ALL WEATHER TRACK"
+        elif "TURF" in course_field:
+            surface = "TURF"
+            # Look for track pattern like "C+3", "A", "B", "A+2", etc.
+            m = re.search(r'"([A-E](?:\+\d)?)"\s*COURSE', course_field)
+            if m:
+                track = m.group(1)
+        else:
+            surface = course_field
+
+    # As a fallback, scan the whole text for '"C+3" COURSE' etc
+    if surface == "TURF" and track is None:
+        m2 = re.search(r'"([A-E](?:\+\d)?)"\s*COURSE', text)
+        if m2:
+            track = m2.group(1)
+
+    return surface, track, going
+
+def parse_race_info(race_info):
+    race_class = None
+    distance = None
+
+    # Extract class
+    class_match = re.match(r'(Class \d+|Group \d+|Restricted Race|Griffin Race)', race_info, re.IGNORECASE)
+    if class_match:
+        race_class = class_match.group(1).title()
+    else:
+        # If not matching the above, try capturing text before the first dash as fallback
+        fallback = race_info.split('-')[0].strip()
+        if fallback:
+            race_class = fallback.title()
+
+    # Extract distance (allow for no space before M)
+    dist_match = re.search(r'(\d{3,4})\s*M', race_info)
+    if dist_match:
+        distance = int(dist_match.group(1))
+
+    return race_class, distance
+
 
 for entry in race_dates:
     date_id = entry["id"]
     date_str = entry["RaceDate"]
-#for date_str in ["2010/01/01"]:
     for course in ["ST", "HV"]:
         race_exists = False
-
-        # Check if Race 1 exists
         race_no = 1
         url = f"https://racing.hkjc.com/racing/information/English/Racing/LocalResults.aspx?RaceDate={date_str}&Racecourse={course}&RaceNo={race_no}"
 
@@ -95,13 +130,18 @@ for entry in race_dates:
             print(f"🔁 {date_str} {course} R1 exists, checking races 1–11")
             race_range = range(1, 12) if course == "ST" else range(1, 10)
             print(f"{dayRemaining} day left")
-            dayRemaining=dayRemaining-1
+            dayRemaining = dayRemaining - 1
             for race_no in race_range:
                 url = f"https://racing.hkjc.com/racing/information/English/Racing/LocalResults.aspx?RaceDate={date_str}&Racecourse={course}&RaceNo={race_no}"
                 try:
                     driver.get(url)
                     wait.until(EC.presence_of_element_located((By.XPATH, "//table[.//td[contains(text(),'Pla.')]]")))
 
+                    # --- Parse race condition fields from HTML ---
+                    html = driver.page_source
+                    soup = BeautifulSoup(html, "html.parser")
+                    surface, track, going = parse_race_conditions(soup)
+                    
                     # Extract race info (Class or Group line)
                     race_info = "N/A"
                     try:
@@ -116,8 +156,7 @@ for entry in race_dates:
                         pass
                     except NoSuchElementException:
                         pass
-
-                    # Extract all horse rows
+                    race_class, distance = parse_race_info(race_info)
                     table = driver.find_element(By.XPATH, "//table[.//td[contains(text(),'Pla.')]]")
                     rows = table.find_elements(By.TAG_NAME, "tr")[1:]
 
@@ -125,7 +164,7 @@ for entry in race_dates:
                         cells = row.find_elements(By.TAG_NAME, "td")
                         if len(cells) < 12:
                             continue
-
+                        
                         data = {
                             "Date": date_str,
                             "Course": course,
@@ -144,7 +183,12 @@ for entry in race_dates:
                             "FinishTime": cells[10].text.strip(),
                             "WinOdds": cells[11].text.strip(),
                             "URL": url,
-                            "RaceDateId": date_id
+                            "RaceDateId": date_id,
+                            "Race_class": race_class,
+                            "Distance": distance,
+                            "Surface": surface,
+                            "Track": track,
+                            "Going": going
                         }
 
                         # Insert into MySQL
@@ -153,15 +197,17 @@ for entry in race_dates:
                                 race_date, course, race_no, race_info,
                                 pla, horse_no, horse, jockey, trainer,
                                 act_wt, declared_wt, draw_no, lbw,
-                                running_position, finish_time, win_odds, url,raceDateId
+                                running_position, finish_time, win_odds, url, raceDateId,
+                                race_class, distance, surface, track, going
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """
                         values = (
                             data["Date"], data["Course"], data["RaceNo"], data["RaceInfo"],
                             data["Pla"], data["HorseNo"], data["Horse"], data["Jockey"], data["Trainer"],
                             data["ActWt"], data["DeclaredWt"], data["Draw"], data["LBW"],
-                            data["RunningPosition"], data["FinishTime"], data["WinOdds"], data["URL"],data["RaceDateId"]
+                            data["RunningPosition"], data["FinishTime"], data["WinOdds"], data["URL"], data["RaceDateId"],
+                            data["Race_class"],data["Distance"],data["Surface"], data["Track"], data["Going"]
                         )
                         cursor.execute(sql, values)
 

@@ -43,7 +43,7 @@ else:
     query = """
     SELECT * FROM race_results
     WHERE raceDateId >= (
-        SELECT MAX(id) - 199 FROM racedates
+        SELECT MAX(id) - 399 FROM racedates
     )
     """
 race_results = pd.read_sql(query, engine)
