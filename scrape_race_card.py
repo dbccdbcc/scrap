@@ -23,6 +23,32 @@ db_config = {
     "charset": "utf8mb4"
 }
 
+# Normalization function
+def normalize_race_info(info):
+    """
+    Parse Class, Distance, Surface, Track, Going from race_info string.
+    Returns (race_class, distance, surface, track, going)
+    """
+    race_class = distance = surface = track = going = None
+
+    # Parse for "Class 5, 1200m, TURF, ... , 'B' Course, GOOD TO FIRM"
+    m = re.search(r'Class\s*(\d+)', info, re.IGNORECASE)
+    if m:
+        race_class = f"Class {m.group(1)}"
+    m = re.search(r'(\d{3,4})\s*m', info, re.IGNORECASE)
+    if m:
+        distance = int(m.group(1))
+    m = re.search(r'(TURF|ALL WEATHER|DIRT)', info, re.IGNORECASE)
+    if m:
+        surface = m.group(1).upper()
+    m = re.search(r'(["“”]?[ABCD][\s"]*Course)', info, re.IGNORECASE)
+    if m:
+        track = m.group(1).replace('"', '').strip()
+    m = re.search(r'(GOOD TO FIRM|GOOD|YIELDING|FIRM|SOFT|WET FAST|SLOW|HEAVY)', info, re.IGNORECASE)
+    if m:
+        going = m.group(1).upper()
+    return race_class, distance, surface, track, going
+
 # Race setup
 race_date = "2025-07-16"
 course = "HV"
@@ -69,6 +95,10 @@ try:
         except Exception as e:
             print(f"⚠️ race_info extraction failed: {e}")
         print(f"✅ race_info: {race_info}")
+
+        # Parse out normalized info
+        race_class, distance, surface, track, going = normalize_race_info(race_info)
+        print(f"🧩 Normalized: class={race_class}, dist={distance}, surface={surface}, track={track}, going={going}")
 
         # Find race table
         tables = soup.find_all("table")
@@ -118,7 +148,12 @@ try:
                 "place_odds": float(cells[8].text.strip()) if len(cells) > 8 and cells[8].text.strip().replace('.', '', 1).isdigit() else None,
                 "race_date": race_date,
                 "course": course,
-                "race_no": race_no
+                "race_no": race_no,
+                "race_class": race_class,
+                "distance": distance,
+                "surface": surface,
+                "track": track,
+                "going": going
             })
 
         print(f"✅ Extracted {len(extracted)} rows")
@@ -128,11 +163,13 @@ try:
                 INSERT INTO future_races (
                     race_info, horse_no, horse, draw_no, act_wt,
                     jockey, trainer, win_odds, place_odds,
-                    race_date, course, race_no
+                    race_date, course, race_no,
+                    race_class, distance, surface, track, going
                 ) VALUES (
                     %(race_info)s, %(horse_no)s, %(horse)s, %(draw_no)s, %(act_wt)s,
                     %(jockey)s, %(trainer)s, %(win_odds)s, %(place_odds)s,
-                    %(race_date)s, %(course)s, %(race_no)s
+                    %(race_date)s, %(course)s, %(race_no)s,
+                    %(race_class)s, %(distance)s, %(surface)s, %(track)s, %(going)s
                 )
             """
             try:
