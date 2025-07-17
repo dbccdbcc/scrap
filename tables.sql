@@ -26,11 +26,11 @@ CREATE TABLE `race_results` (
   `win_odds` varchar(10) DEFAULT NULL,
   `url` text,
   `raceDateId` int DEFAULT NULL,
-  `race_class` varchar(20) DEFAULT NULL,
+  `race_class` varchar(100) DEFAULT NULL,
   `distance` int DEFAULT NULL,
-  `surface` varchar(20) DEFAULT NULL,
-  `track` varchar(20) DEFAULT NULL,
-  `going` varchar(40) DEFAULT NULL,
+  `surface` varchar(100) DEFAULT NULL,
+  `track` varchar(100) DEFAULT NULL,
+  `going` varchar(100) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `fk_race_results_raceDateId` (`raceDateId`),
   CONSTRAINT `fk_race_results_raceDateId` FOREIGN KEY (`raceDateId`) REFERENCES `racedates` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
@@ -51,11 +51,11 @@ CREATE TABLE `future_races` (
   `race_date` date DEFAULT NULL,
   `course` varchar(50) DEFAULT NULL,
   `race_no` int DEFAULT NULL,
-  `race_class` varchar(20) DEFAULT NULL,
+  `race_class` varchar(100) DEFAULT NULL,
   `distance` int DEFAULT NULL,
-  `surface` varchar(20) DEFAULT NULL,
-  `track` varchar(20) DEFAULT NULL,
-  `going` varchar(40) DEFAULT NULL,
+  `surface` varchar(100) DEFAULT NULL,
+  `track` varchar(100) DEFAULT NULL,
+  `going` varchar(100) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=109 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
