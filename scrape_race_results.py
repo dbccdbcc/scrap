@@ -29,7 +29,7 @@ cursor = conn.cursor()
 cursor.execute("SELECT MAX(raceDateId) FROM race_results")
 max_id_in_results = cursor.fetchone()[0] or 0  # fallback to 0 if None
 START_ID = max_id_in_results + 1
-END_ID = START_ID + 5  # or any batch size
+END_ID = START_ID + 49  # or any batch size
 dayRemaining = END_ID-START_ID+1
 
 if START_ID <= max_id_in_results:
@@ -92,21 +92,17 @@ def parse_race_info(race_info):
     race_class = None
     distance = None
 
-    # Extract class
-    class_match = re.match(r'(Class \d+|Group \d+|Restricted Race|Griffin Race)', race_info, re.IGNORECASE)
-    if class_match:
-        race_class = class_match.group(1).title()
+    # 1. Extract class: everything before the first dash
+    if '-' in race_info:
+        race_class = race_info.split('-')[0].strip()
     else:
-        # If not matching the above, try capturing text before the first dash as fallback
-        fallback = race_info.split('-')[0].strip()
-        if fallback:
-            race_class = fallback.title()
+        race_class = race_info.strip()
 
-    # Extract distance (allow for no space before M)
+    # 2. Extract distance (number before M, with or without space)
     dist_match = re.search(r'(\d{3,4})\s*M', race_info)
     if dist_match:
         distance = int(dist_match.group(1))
-
+    #print(race_class, distance)
     return race_class, distance
 
 
@@ -149,39 +145,45 @@ for entry in race_dates:
                         for td in td_elements:
                             lines = td.text.strip().splitlines()
                             for line in lines:
-                                if ("Class" in line or "Group" in line or "Restricted" in line or "Griffin" in line) and "M" in line:
+                                if ("Class" in line or "Group" in line or "Restricted" in line or "Griffin" in line or "Hong" in line) and "M" in line:
                                     race_info = line.strip()
                                     raise StopIteration
                     except StopIteration:
                         pass
                     except NoSuchElementException:
                         pass
+                    #print(race_info)
                     race_class, distance = parse_race_info(race_info)
                     table = driver.find_element(By.XPATH, "//table[.//td[contains(text(),'Pla.')]]")
                     rows = table.find_elements(By.TAG_NAME, "tr")[1:]
+                    
 
                     for row in rows:
                         cells = row.find_elements(By.TAG_NAME, "td")
-                        if len(cells) < 12:
-                            continue
-                        
+                        min_expected_cols = 12
+                        cell_texts = [cell.text.strip() for cell in cells]
+                        if len(cell_texts) < min_expected_cols:
+                            print(f"⚠️ Row has {len(cells)} cells. Padding with N/A: {cell_texts}")
+                        while len(cell_texts) < min_expected_cols:
+                            cell_texts.append("N/A")
+                    
                         data = {
                             "Date": date_str,
                             "Course": course,
                             "RaceNo": race_no,
                             "RaceInfo": race_info,
-                            "Pla": cells[0].text.strip(),
-                            "HorseNo": cells[1].text.strip(),
-                            "Horse": cells[2].text.strip(),
-                            "Jockey": cells[3].text.strip(),
-                            "Trainer": cells[4].text.strip(),
-                            "ActWt": cells[5].text.strip(),
-                            "DeclaredWt": cells[6].text.strip(),
-                            "Draw": cells[7].text.strip(),
-                            "LBW": cells[8].text.strip(),
-                            "RunningPosition": cells[9].text.strip(),
-                            "FinishTime": cells[10].text.strip(),
-                            "WinOdds": cells[11].text.strip(),
+                            "Pla": cell_texts[0],
+                            "HorseNo": cell_texts[1],
+                            "Horse": cell_texts[2],
+                            "Jockey": cell_texts[3],
+                            "Trainer": cell_texts[4],
+                            "ActWt": cell_texts[5],
+                            "DeclaredWt": cell_texts[6],
+                            "Draw": cell_texts[7],
+                            "LBW": cell_texts[8],
+                            "RunningPosition": cell_texts[9],
+                            "FinishTime": cell_texts[10],
+                            "WinOdds": cell_texts[11],
                             "URL": url,
                             "RaceDateId": date_id,
                             "Race_class": race_class,
@@ -209,8 +211,14 @@ for entry in race_dates:
                             data["RunningPosition"], data["FinishTime"], data["WinOdds"], data["URL"], data["RaceDateId"],
                             data["Race_class"],data["Distance"],data["Surface"], data["Track"], data["Going"]
                         )
-                        cursor.execute(sql, values)
-
+                        try:
+                            cursor.execute(sql, values)
+                        except Exception as e:
+                            print(f"❌ DB Insert error on {date_str} {course} R{race_no} row: {cell_texts}")
+                            print(f"    SQL values: {values}")
+                            print(f"    Exception: {e}")
+                            continue
+                        
                     print(f"✅ {date_str} {course} R{race_no} extracted and inserted")
                     try:
                         del rows
