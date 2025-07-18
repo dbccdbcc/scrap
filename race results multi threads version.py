@@ -117,7 +117,8 @@ def scrape_batch(race_dates_batch, batch_no):
 
     try:
         driver = webdriver.Chrome(options=options)
-        wait = WebDriverWait(driver, 12)
+        wait = WebDriverWait(driver, 30)
+        date_remain = len(race_dates_batch)
         for entry in race_dates_batch:
             date_id = entry["id"]
             date_str = entry["RaceDate"]
@@ -141,6 +142,8 @@ def scrape_batch(race_dates_batch, batch_no):
                     continue
 
                 if race_exists:
+                    print(f"{date_remain} remaining")
+                    date_remain = date_remain - 1
                     print(f"Batch {batch_no}: 🔁 {date_str} {course} R1 exists, checking races 1–11")
                     race_range = range(1, 12) if course == "ST" else range(1, 10)
                     for idx, race_no in enumerate(race_range, 1):
@@ -242,8 +245,9 @@ def scrape_batch(race_dates_batch, batch_no):
                         except TimeoutException:
                             print(f"Batch {batch_no}: ⚠️ Timeout: {date_str} {course} R{race_no}, skipping.")
                         except Exception as ex:
-                            print(f"Batch {batch_no}: ⚠️ Skipped: {date_str} {course} R{race_no}, {str(ex)}")
-                            print(traceback.format_exc())
+                            #print(f"Batch {batch_no}: ⚠️ Skipped: {date_str} {course} R{race_no}, {str(ex)}")
+                            print(f"Batch {batch_no}: ⚠️ Skipped: {date_str} {course} R{race_no}")
+                            #print(traceback.format_exc())
                 # Full GC at the end of each date
                 gc.collect()
         conn.commit()
@@ -275,7 +279,7 @@ if __name__ == "__main__":
     cursor.execute("SELECT MAX(raceDateId) FROM race_results")
     max_id_in_results = cursor.fetchone()[0] or 0
     START_ID = max_id_in_results + 1
-    END_ID = START_ID + 98  # or as needed
+    END_ID = START_ID + 19  # or as needed, not too much, will cause chrome drive crash
     cursor.execute(
         "SELECT id, RaceDate FROM racedates WHERE id BETWEEN %s AND %s ORDER BY id",
         (START_ID, END_ID)
@@ -286,7 +290,7 @@ if __name__ == "__main__":
     ]
     cursor.close()
     conn.close()
-    num_batches = 3  # Adjust for your hardware.
+    num_batches = 2  # Adjust for your hardware. if 3 or more do not scrap more than 100 days
     batch_size = math.ceil(len(race_dates) / num_batches)
     processes = []
     for i in range(num_batches):

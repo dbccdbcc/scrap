@@ -29,7 +29,7 @@ cursor = conn.cursor()
 cursor.execute("SELECT MAX(raceDateId) FROM race_results")
 max_id_in_results = cursor.fetchone()[0] or 0  # fallback to 0 if None
 START_ID = max_id_in_results + 1
-END_ID = START_ID + 49  # or any batch size
+END_ID = START_ID + 29  # or any batch size
 dayRemaining = END_ID-START_ID+1
 
 if START_ID <= max_id_in_results:
@@ -46,12 +46,18 @@ race_dates = [
     for row in cursor.fetchall()
 ]
 
-options = webdriver.ChromeOptions()
-options.add_argument("--headless")
-driver = webdriver.Chrome(options=options)
-wait = WebDriverWait(driver, 10)
+# ---- Driver starter function
+def start_driver():
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    return webdriver.Chrome(options=options)
 
-# --- New function for parsing surface/track/going from HTML ---
+N_RESTART = 10  # Restart ChromeDriver every 10 dates
+
+driver = start_driver()
+wait = WebDriverWait(driver, 15)
+
+# --- Function for parsing surface/track/going from HTML ---
 def parse_race_conditions(soup):
     text = soup.get_text(separator="\n", strip=True)
     going = None
@@ -73,14 +79,12 @@ def parse_race_conditions(soup):
             track = "ALL WEATHER TRACK"
         elif "TURF" in course_field:
             surface = "TURF"
-            # Look for track pattern like "C+3", "A", "B", "A+2", etc.
             m = re.search(r'"([A-E](?:\+\d)?)"\s*COURSE', course_field)
             if m:
                 track = m.group(1)
         else:
             surface = course_field
 
-    # As a fallback, scan the whole text for '"C+3" COURSE' etc
     if surface == "TURF" and track is None:
         m2 = re.search(r'"([A-E](?:\+\d)?)"\s*COURSE', text)
         if m2:
@@ -92,21 +96,28 @@ def parse_race_info(race_info):
     race_class = None
     distance = None
 
-    # 1. Extract class: everything before the first dash
     if '-' in race_info:
         race_class = race_info.split('-')[0].strip()
     else:
         race_class = race_info.strip()
 
-    # 2. Extract distance (number before M, with or without space)
     dist_match = re.search(r'(\d{3,4})\s*M', race_info)
     if dist_match:
         distance = int(dist_match.group(1))
-    #print(race_class, distance)
     return race_class, distance
 
+for i, entry in enumerate(race_dates):
+    # === Driver restart logic ===
+    if i > 0 and i % N_RESTART == 0:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        gc.collect()
+        print(f"♻️ Restarting ChromeDriver after {N_RESTART} dates")
+        driver = start_driver()
+        wait = WebDriverWait(driver, 15)
 
-for entry in race_dates:
     date_id = entry["id"]
     date_str = entry["RaceDate"]
     for course in ["ST", "HV"]:
@@ -125,7 +136,7 @@ for entry in race_dates:
         if race_exists:
             print(f"🔁 {date_str} {course} R1 exists, checking races 1–11")
             race_range = range(1, 12) if course == "ST" else range(1, 10)
-            print(f"{dayRemaining} day left")
+            print(f"{dayRemaining} day(s) left")
             dayRemaining = dayRemaining - 1
             for race_no in race_range:
                 url = f"https://racing.hkjc.com/racing/information/English/Racing/LocalResults.aspx?RaceDate={date_str}&Racecourse={course}&RaceNo={race_no}"
@@ -133,12 +144,10 @@ for entry in race_dates:
                     driver.get(url)
                     wait.until(EC.presence_of_element_located((By.XPATH, "//table[.//td[contains(text(),'Pla.')]]")))
 
-                    # --- Parse race condition fields from HTML ---
                     html = driver.page_source
                     soup = BeautifulSoup(html, "html.parser")
                     surface, track, going = parse_race_conditions(soup)
                     
-                    # Extract race info (Class or Group line)
                     race_info = "N/A"
                     try:
                         td_elements = driver.find_elements(By.XPATH, "//td")
@@ -152,11 +161,10 @@ for entry in race_dates:
                         pass
                     except NoSuchElementException:
                         pass
-                    #print(race_info)
+
                     race_class, distance = parse_race_info(race_info)
                     table = driver.find_element(By.XPATH, "//table[.//td[contains(text(),'Pla.')]]")
                     rows = table.find_elements(By.TAG_NAME, "tr")[1:]
-                    
 
                     for row in rows:
                         cells = row.find_elements(By.TAG_NAME, "td")
@@ -193,7 +201,6 @@ for entry in race_dates:
                             "Going": going
                         }
 
-                        # Insert into MySQL
                         sql = """
                             INSERT INTO race_results (
                                 race_date, course, race_no, race_info,
