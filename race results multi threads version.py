@@ -237,7 +237,7 @@ if __name__ == "__main__":
     cursor.execute("SELECT MAX(raceDateId) FROM race_results")
     max_id_in_results = cursor.fetchone()[0] or 0
     START_ID = max_id_in_results + 1
-    END_ID = START_ID + 59  # or as needed
+    END_ID = START_ID + 98  # or as needed
     cursor.execute(
         "SELECT id, RaceDate FROM racedates WHERE id BETWEEN %s AND %s ORDER BY id",
         (START_ID, END_ID)
@@ -248,7 +248,7 @@ if __name__ == "__main__":
     ]
     cursor.close()
     conn.close()
-    num_batches = 6  # You can change the numner to a higher/lower value to test performance
+    num_batches = 3  # You can change the numner to a higher/lower value to test performance
     batch_size = math.ceil(len(race_dates) / num_batches)
     processes = []
     for i in range(num_batches):
