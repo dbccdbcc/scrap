@@ -3,13 +3,24 @@
 """
 import os
 import math
+import time
+import random
+import gc
 from multiprocessing import Process
 from dotenv import load_dotenv
 import pymysql
 import re
 from bs4 import BeautifulSoup
 
+# BONUS: Only if you have psutil installed; otherwise, comment out.
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 def parse_race_conditions(soup):
+    # ... (same as before, omitted for brevity)
     text = soup.get_text(separator="\n", strip=True)
     going = None
     surface = None
@@ -37,6 +48,7 @@ def parse_race_conditions(soup):
     return surface, track, going
 
 def parse_race_info(race_info):
+    # ... (same as before)
     race_class = None
     distance = None
     if '-' in race_info:
@@ -47,6 +59,29 @@ def parse_race_info(race_info):
     if dist_match:
         distance = int(dist_match.group(1))
     return race_class, distance
+
+def cleanup_chrome_driver(driver):
+    """Ensure Chrome and chromedriver are fully closed, with bonus zombie cleanup."""
+    try:
+        driver.quit()
+    except Exception:
+        pass
+    # Bonus: Use psutil to kill stray chrome/chromedriver if any.
+    if PSUTIL_AVAILABLE:
+        proc_names = ['chromedriver.exe', 'chrome.exe']
+        for proc in psutil.process_iter(['name']):
+            if proc.info['name'] in proc_names:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+
+def print_mem(prefix=""):
+    # Print memory usage of current process for debug.
+    import os, psutil
+    process = psutil.Process(os.getpid())
+    mem = process.memory_info().rss / 1024**2
+    print(f"{prefix} Memory: {mem:.1f} MB")
 
 def scrape_batch(race_dates_batch, batch_no):
     import pymysql
@@ -77,9 +112,12 @@ def scrape_batch(race_dates_batch, batch_no):
     options.add_argument('--log-level=3')
     options.add_experimental_option('excludeSwitches', ['enable-logging'])
 
+    # Small random sleep to stagger process start and reduce initial Chrome lag
+    time.sleep(random.uniform(0.5, 2.0))
+
     try:
         driver = webdriver.Chrome(options=options)
-        wait = WebDriverWait(driver, 12)  # 12s explicit wait
+        wait = WebDriverWait(driver, 12)
         for entry in race_dates_batch:
             date_id = entry["id"]
             date_str = entry["RaceDate"]
@@ -193,29 +231,29 @@ def scrape_batch(race_dates_batch, batch_no):
                             if idx % 3 == 0:
                                 print(f"Batch {batch_no}: Progress {date_str} {course} R{race_no} ({idx}/{len(race_range)}) | Elapsed: {round(time.time()-t0,1)}s")
 
-                            # Clean up for each race, only every few races call gc.collect
+                            # Extra clean-up
                             del rows, table, td_elements
-                            if idx % 3 == 0: gc.collect()
-
+                            if idx % 3 == 0:
+                                gc.collect()
+                            #slow down a bit to avoid browser queue congestion
+                            time.sleep(random.uniform(0.1, 0.3))
+                            #print_mem(f"Batch {batch_no} {date_str} {course} R{race_no}:") #for memory monitoring
                             print(f"Batch {batch_no}: ✅ {date_str} {course} R{race_no} extracted and inserted")
                         except TimeoutException:
                             print(f"Batch {batch_no}: ⚠️ Timeout: {date_str} {course} R{race_no}, skipping.")
                         except Exception as ex:
                             print(f"Batch {batch_no}: ⚠️ Skipped: {date_str} {course} R{race_no}, {str(ex)}")
                             print(traceback.format_exc())
-            # Full GC at the end of each date
-            gc.collect()
+                # Full GC at the end of each date
+                gc.collect()
         conn.commit()
     except Exception as e:
         print(f"Batch {batch_no} error: {str(e)}")
         import traceback
         print(traceback.format_exc())
     finally:
-        try:
-            driver.quit()
-            print(f"Batch {batch_no}: ChromeDriver closed.")
-        except Exception:
-            pass
+        cleanup_chrome_driver(driver)
+        print(f"Batch {batch_no}: ChromeDriver closed.")
         try:
             cursor.close()
             conn.close()
@@ -248,7 +286,7 @@ if __name__ == "__main__":
     ]
     cursor.close()
     conn.close()
-    num_batches = 3  # You can change the numner to a higher/lower value to test performance
+    num_batches = 3  # Adjust for your hardware.
     batch_size = math.ceil(len(race_dates) / num_batches)
     processes = []
     for i in range(num_batches):
@@ -257,6 +295,8 @@ if __name__ == "__main__":
         p = Process(target=scrape_batch, args=(batch, i+1))
         processes.append(p)
         p.start()
+        # Stagger process start to avoid Chrome congestion
+        time.sleep(random.uniform(0.2, 0.6))
     for p in processes:
         p.join()
     print("✅ All batches completed.")
