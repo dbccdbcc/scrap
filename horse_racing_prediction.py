@@ -11,7 +11,6 @@ import re
 def clean_horse_name(name):
     if not isinstance(name, str):
         return ''
-    # Remove everything in parentheses and trailing whitespace
     return re.sub(r'\s*\(.*?\)', '', name).strip()
 
 # ---------- DB Setup ----------
@@ -33,19 +32,9 @@ print(f"racedates table contains {racedate_count} rows.")
 
 print("Reading recent race_results from the database...")
 if racedate_count < 400:
-    query = """
-    SELECT * FROM race_results
-    WHERE raceDateId >= (
-        SELECT MIN(id) FROM racedates
-    )
-    """
+    query = "SELECT * FROM race_results WHERE raceDateId >= (SELECT MIN(id) FROM racedates)"
 else:
-    query = """
-    SELECT * FROM race_results
-    WHERE raceDateId >= (
-        SELECT MAX(id) - 399 FROM racedates
-    )
-    """
+    query = "SELECT * FROM race_results WHERE raceDateId >= (SELECT MAX(id) - 399 FROM racedates)"
 race_results = pd.read_sql(query, engine)
 print(f"race_results loaded: {race_results.shape[0]} rows.")
 
@@ -53,12 +42,11 @@ print("Reading future_races table from the database...")
 future_races = pd.read_sql("SELECT * FROM future_races", engine)
 print(f"future_races loaded: {future_races.shape[0]} rows.")
 
-# ---------- Clean Horse Names for Both Tables ----------
+# ---------- Clean Horse Names ----------
 race_results['horse_clean'] = race_results['horse'].apply(clean_horse_name)
 future_races['horse_clean'] = future_races['horse'].apply(clean_horse_name)
 
 # ---------- Process Labels ----------
-print("Processing labels...")
 def parse_pla(x):
     try:
         return int(x)
@@ -69,49 +57,67 @@ race_results['placed'] = race_results['pla_num'].isin([1,2,3]).astype(int)
 race_results['won'] = race_results['pla_num'].eq(1).astype(int)
 
 # ---------- Feature Engineering for Historical Races ----------
-print("Feature engineering for historical races with progress bar (manual loop)...")
-def get_last_features(horse_clean, date):
+def safe_mode(series):
+    """Returns mode or NaN for empty."""
+    return series.mode().iloc[0] if not series.mode().empty else np.nan
+
+def get_last10_features(horse_clean, date):
     prev = race_results[(race_results['horse_clean'] == horse_clean) & (race_results['race_date'] < date)]
     prev = prev.sort_values('race_date', ascending=False)
-    if prev.empty:
-        return pd.Series({'last_place': np.nan, 'last_odds': np.nan, 'avg_place3': np.nan, 'runs': 0, 'days_since_last': np.nan,
-                          'race_class': None, 'distance': None, 'surface': None, 'track': None, 'going': None})
-    last = prev.iloc[0]
-    avg_place3 = prev.head(3)['pla_num'].mean()
-    days_since_last = (pd.to_datetime(date) - pd.to_datetime(last['race_date'])).days
-    return pd.Series({
-        'last_place': last['pla_num'],
-        'last_odds': pd.to_numeric(last['win_odds'], errors='coerce'),
-        'avg_place3': avg_place3,
-        'runs': len(prev),
-        'days_since_last': days_since_last,
-        'race_class': last.get('race_class', None),
-        'distance': last.get('distance', None),
-        'surface': last.get('surface', None),
-        'track': last.get('track', None),
-        'going': last.get('going', None)
-    })
+    last10 = prev.head(10)
+    # If not enough history, pad with NaN
+    features = {}
+    features['avg_place10'] = last10['pla_num'].mean() if not last10.empty else np.nan
+    features['runs10'] = len(last10)
+    features['days_since_last'] = (pd.to_datetime(date) - pd.to_datetime(last10['race_date']).max()).days if not last10.empty else np.nan
+    features['avg_odds10'] = pd.to_numeric(last10['win_odds'], errors='coerce').mean() if not last10.empty else np.nan
+    features['mode_course10'] = safe_mode(last10['course'])
+    features['mode_jockey10'] = safe_mode(last10['jockey'])
+    features['mode_trainer10'] = safe_mode(last10['trainer'])
+    features['mode_race_class10'] = safe_mode(last10['race_class'])
+    features['mode_surface10'] = safe_mode(last10['surface'])
+    features['mode_track10'] = safe_mode(last10['track'])
+    features['mode_going10'] = safe_mode(last10['going'])
+    features['avg_distance10'] = pd.to_numeric(last10['distance'], errors='coerce').mean() if not last10.empty else np.nan
+    return pd.Series(features)
 
+print("Feature engineering for historical races (looping, please wait)...")
 feature_list = []
 for idx, row in tqdm(race_results.iterrows(), total=len(race_results), desc="  Historical Features"):
-    feature_list.append(get_last_features(row['horse_clean'], row['race_date']))
+    feature_list.append(get_last10_features(row['horse_clean'], row['race_date']))
 features = pd.DataFrame(feature_list)
 race_results = pd.concat([race_results.reset_index(drop=True), features], axis=1)
 
-# One-hot encode new fields for model
-categorical_cols = ['race_class', 'surface', 'track', 'going']
+# --- Categorical columns for one-hot ---
+categorical_cols = [
+    'mode_course10', 'mode_jockey10', 'mode_trainer10',
+    'mode_race_class10', 'mode_surface10', 'mode_track10', 'mode_going10'
+]
 race_results = pd.get_dummies(race_results, columns=categorical_cols, dummy_na=True)
 race_results = race_results.loc[:, ~race_results.columns.duplicated()]
-feature_cols = ['last_place', 'last_odds', 'avg_place3', 'runs', 'days_since_last', 'distance'] \
-               + [c for c in race_results.columns if any(col + '_' in c for col in categorical_cols)]
+
+# --- Feature columns ---
+feature_cols = [
+    'avg_place10', 'runs10', 'days_since_last', 'avg_odds10', 'avg_distance10'
+] + [c for c in race_results.columns if any(col + '_' in c for col in categorical_cols)]
 feature_cols = pd.unique(feature_cols)
 
-train = race_results.dropna(subset=['last_place', 'last_odds', 'avg_place3', 'placed', 'won', 'distance'])
+# --- Remove any columns with all NaN/zero ---
+X_train_full = race_results[feature_cols]
+X_train = X_train_full.loc[:, X_train_full.var() > 0]  # keep only with variance
+used_feature_cols = X_train.columns
+
+train = race_results.dropna(subset=list(used_feature_cols) + ['placed', 'won'])
 print(f"Training data prepared: {train.shape[0]} samples.")
 
-X = train[feature_cols]
+X = train[used_feature_cols]
 y_place = train['placed']
 y_win = train['won']
+
+print("Sample training features:")
+print(X.head())
+print("Feature variance (should not be all zero):")
+print(X.var())
 
 # ---------- Train XGBoost Models ----------
 print("Training XGBoost model for place probability...")
@@ -142,65 +148,58 @@ win_model = xgb.XGBClassifier(
 win_model.fit(X, y_win)
 print("Win model training complete.")
 
-# ---------- Feature Engineering for Future Races (using horse_clean) ----------
+# ---------- Feature Engineering for Future Races ----------
 print("Feature engineering for future races...")
 future_feature_list = []
 for idx, row in tqdm(future_races.iterrows(), total=len(future_races), desc="  Future Features"):
-    future_feature_list.append(get_last_features(row['horse_clean'], row['race_date']))
+    future_feature_list.append(get_last10_features(row['horse_clean'], row['race_date']))
 future_features = pd.DataFrame(future_feature_list)
 future_races = pd.concat([future_races.reset_index(drop=True), future_features], axis=1)
 
-# One-hot encode for future races, matching historical data columns
 future_races = pd.get_dummies(future_races, columns=categorical_cols, dummy_na=True)
 future_races = future_races.loc[:, ~future_races.columns.duplicated()]
 
-# Align columns with training data (add missing columns with zeros, but don't overwrite DataFrame!)
-for col in feature_cols:
+# Align columns with training data
+for col in used_feature_cols:
     if col not in future_races.columns:
         future_races[col] = 0
-X_future = future_races[feature_cols].fillna(-1)
+X_future = future_races[used_feature_cols].fillna(-1)
 
-# ！！！metadata 唔 overwrite，保持所有 column
+print("Future Features Sample:")
+print(X_future.head())
+
+# ---------- Predict Probabilities ----------
 future_races['place_probability'] = place_model.predict_proba(X_future)[:,1]
 future_races['win_probability'] = win_model.predict_proba(X_future)[:,1]
 print("Predictions for future races complete.")
 
-# ---------- Monte Carlo Simulations ----------
-def monte_carlo_place_simulation(place_probs, n_sim=10000):
-    n = len(place_probs)
-    results = np.zeros(n)
-    for _ in range(n_sim):
-        placed = np.random.rand(n) < place_probs
-        results += placed
-    return results / n_sim
-
-def monte_carlo_win_simulation(win_probs, n_sim=10000):
+# ---------- Improved Monte Carlo Simulations (ranking) ----------
+def monte_carlo_rank_simulation(win_probs, n_sim=10000, top_n=3):
     n = len(win_probs)
-    results = np.zeros(n)
     win_probs = np.array(win_probs)
-    if win_probs.sum() == 0:
-        return results
+    horses_in_top_n = np.zeros(n)
+    wins = np.zeros(n)
     for _ in range(n_sim):
-        winner = np.random.choice(n, p=win_probs / win_probs.sum())
-        results[winner] += 1
-    return results / n_sim
+        # Add random Gumbel noise to log odds (random utility model)
+        utilities = np.log(win_probs + 1e-10) + np.random.gumbel(size=n)
+        ranks = np.argsort(-utilities)  # higher is better
+        wins[ranks[0]] += 1
+        horses_in_top_n[ranks[:top_n]] += 1
+    return wins / n_sim, horses_in_top_n / n_sim
 
-print("Running Monte Carlo simulations for future races...")
+print("Running improved Monte Carlo simulations for future races...")
 output = []
-# 🟢 Now groupby is SAFE!
 race_groups = list(future_races.groupby(['race_date', 'race_no']))
 for (race_id, race_df) in tqdm(race_groups, desc="Monte Carlo Races"):
     horses = race_df['horse'].values
     horse_cleans = race_df['horse_clean'].values
     horse_nos = race_df['horse_no'].values
-    place_probs = race_df['place_probability'].values
     win_probs = race_df['win_probability'].values
 
-    sim_place_pct = monte_carlo_place_simulation(place_probs, n_sim=10000)
-    sim_win_pct = monte_carlo_win_simulation(win_probs, n_sim=10000)
+    sim_win_pct, sim_place_pct = monte_carlo_rank_simulation(win_probs, n_sim=10000, top_n=3)
 
-    for horse, horse_clean, h_no, p_prob, w_prob, sim_p, sim_w in zip(
-            horses, horse_cleans, horse_nos, place_probs, win_probs, sim_place_pct, sim_win_pct
+    for horse, horse_clean, h_no, w_prob, sim_w, sim_p in zip(
+            horses, horse_cleans, horse_nos, win_probs, sim_win_pct, sim_place_pct
         ):
         output.append({
             'race_date': race_id[0],
@@ -209,7 +208,6 @@ for (race_id, race_df) in tqdm(race_groups, desc="Monte Carlo Races"):
             'horse_clean': horse_clean,
             'horse_no': h_no,
             'win_probability': w_prob,
-            'place_probability': p_prob,
             'sim_win_pct': sim_w,
             'sim_place_pct': sim_p
         })
@@ -218,7 +216,7 @@ sim_results = pd.DataFrame(output)
 print("Monte Carlo simulation complete.")
 
 # ---------- Prepare Final Results Table ----------
-final_results = sim_results[['race_date', 'race_no', 'horse_no', 'horse', 'win_probability', 'place_probability', 'sim_win_pct', 'sim_place_pct']]
+final_results = sim_results[['race_date', 'race_no', 'horse_no', 'horse', 'win_probability', 'sim_win_pct', 'sim_place_pct']]
 
 # ---------- Save to MySQL ----------
 print("Saving results to MySQL table 'race_predictions'...")
