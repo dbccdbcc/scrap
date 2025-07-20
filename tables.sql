@@ -61,12 +61,14 @@ CREATE TABLE `future_races` (
 
 -- Table race_predictions (model + simulation output)
 CREATE TABLE `race_predictions` (
-  `race_date` DATETIME DEFAULT NULL,
-  `race_no` BIGINT DEFAULT NULL,
-  `horse_no` BIGINT DEFAULT NULL,
-  `horse` TEXT,
-  `win_probability` FLOAT DEFAULT NULL,
-  `place_probability` FLOAT DEFAULT NULL,
-  `sim_win_pct` FLOAT DEFAULT NULL,
-  `sim_place_pct` FLOAT DEFAULT NULL
+  `race_date` date DEFAULT NULL,
+  `race_no` bigint DEFAULT NULL,
+  `horse_no` bigint DEFAULT NULL,
+  `horse` text,
+  `win_probability` double DEFAULT NULL,
+  `place_probability` double DEFAULT NULL,
+  `mc_win_pct` double DEFAULT NULL,
+  `mc_2nd_pct` double DEFAULT NULL,
+  `mc_3rd_pct` double DEFAULT NULL,
+  `mc_top3_pct` double DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
