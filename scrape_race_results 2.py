@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Jul 18 16:30:32 2025
+
+@author: User
+"""
+
 """
 @author: Daniel
 """
@@ -28,8 +35,8 @@ cursor = conn.cursor()
 # Get race dates from MySQL table
 cursor.execute("SELECT MAX(raceDateId) FROM race_results")
 max_id_in_results = cursor.fetchone()[0] or 0  # fallback to 0 if None
-START_ID = max_id_in_results + 1
-END_ID = START_ID   # or any batch size
+START_ID = max_id_in_results + 51
+END_ID = START_ID + 49  # or any batch size
 dayRemaining = END_ID-START_ID+1
 
 if START_ID <= max_id_in_results:

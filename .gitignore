@@ -2,3 +2,10 @@
 /old
 .env
 .env
+/page
+patch_data_for reace_results.py
+/outputs
+untitled0.py
+new race results.py
+debug.py
+score_future_races_ranked_v5_keep_ids.py
